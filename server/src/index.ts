@@ -3,6 +3,7 @@ import cors from "cors";
 import { marketRouter } from "./routes/market.js";
 import { portfolioRouter } from "./routes/portfolio.js";
 import { aiRouter } from "./routes/ai.js";
+import { traderRouter } from "./routes/trader.js";
 import { allStats } from "./providers/registry.js";
 import { requireApiKey } from "./auth.js";
 import { rateLimit } from "./rateLimit.js";
@@ -34,6 +35,9 @@ app.use(express.json());
 // caller could otherwise repeat the multi-provider fan-out in market.ts (up to
 // hundreds of outbound calls per request — see getQuotes) fast enough to get
 // this deployment's IP rate-limited or banned by Nasdaq/Yahoo/Stooq/SEC.
+// Same keyless public data as market.ts, but each call starts a Python
+// process (see providers/traderskill.ts), so it gets its own, tighter bucket.
+app.use("/api/trader", rateLimit({ windowMs: 60_000, max: 30 }), traderRouter);
 app.use("/api", rateLimit({ windowMs: 60_000, max: 240 }), marketRouter);
 // Portfolio data and the paid AI endpoint require a shared secret; see auth.ts.
 app.use("/api/portfolios", requireApiKey, portfolioRouter);
