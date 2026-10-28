@@ -10,12 +10,37 @@ const NAMES: Record<string, string> = {
 /** Plain tickers (BTC, ETH, ...) this app treats as crypto for routing quotes/history. */
 export const CRYPTO_SYMBOLS = new Set(Object.keys(NAMES).map((s) => s.replace("USDT", "")));
 
+// api.binance.com refuses some regions outright (HTTP 451 "restricted location",
+// sometimes 403) — the US among them. Binance.US serves the same v3 public
+// endpoints, response shapes and USDT pairs, so a geo-block falls over to it.
+const GLOBAL = "https://api.binance.com";
+const US = "https://api.binance.us";
+const GEO_BLOCKED = new Set([403, 451]);
+// The region doesn't change between requests, so once blocked go straight to
+// Binance.US for a while instead of paying two round trips per quote — then
+// try global again, in case the deployment moved.
+const BLOCK_TTL_MS = 3_600_000;
+let globalBlockedUntil = 0;
+
+/** Resets the remembered geo-block (tests only). */
+export function resetGeoBlock(): void {
+  globalBlockedUntil = 0;
+}
+
+/** GETs a Binance v3 public path, falling back to Binance.US when api.binance.com geo-blocks this host. */
+async function binanceFetch(path: string): Promise<{ res: Response; exchange: "Binance" | "Binance.US" }> {
+  if (Date.now() >= globalBlockedUntil) {
+    const res = await fetch(GLOBAL + path);
+    if (!GEO_BLOCKED.has(res.status)) return { res, exchange: "Binance" };
+    globalBlockedUntil = Date.now() + BLOCK_TTL_MS;
+  }
+  return { res: await fetch(US + path), exchange: "Binance.US" };
+}
+
 /** Fallback crypto board built from Binance public 24hr tickers (no key required). */
 export async function markets(): Promise<CryptoRow[]> {
   const symbols = Object.keys(NAMES);
-  const url =
-    "https://api.binance.com/api/v3/ticker/24hr?symbols=" + encodeURIComponent(JSON.stringify(symbols));
-  const res = await fetch(url);
+  const { res } = await binanceFetch("/api/v3/ticker/24hr?symbols=" + encodeURIComponent(JSON.stringify(symbols)));
   if (!res.ok) throw new Error(`binance ${res.status}`);
   const rows: any[] = await res.json();
   return rows
@@ -35,7 +60,7 @@ export async function markets(): Promise<CryptoRow[]> {
 
 export async function orderBook(symbol: string, limit = 20): Promise<{ bids: [string, string][]; asks: [string, string][] }> {
   const pair = encodeURIComponent(symbol.toUpperCase() + "USDT");
-  const res = await fetch(`https://api.binance.com/api/v3/depth?symbol=${pair}&limit=${limit}`);
+  const { res } = await binanceFetch(`/api/v3/depth?symbol=${pair}&limit=${limit}`);
   if (!res.ok) throw new Error(`binance ${res.status}`);
   const d = await res.json();
   return { bids: d.bids ?? [], asks: d.asks ?? [] };
@@ -44,7 +69,7 @@ export async function orderBook(symbol: string, limit = 20): Promise<{ bids: [st
 /** Single-symbol quote so crypto tickers can flow through the same /api/quotes path as stocks. */
 export async function quote(symbol: string): Promise<Quote> {
   const pair = symbol.toUpperCase() + "USDT";
-  const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${encodeURIComponent(pair)}`);
+  const { res, exchange } = await binanceFetch(`/api/v3/ticker/24hr?symbol=${encodeURIComponent(pair)}`);
   if (!res.ok) throw new Error(`binance ticker ${res.status}`);
   const d = await res.json();
   return {
@@ -70,7 +95,7 @@ export async function quote(symbol: string): Promise<Quote> {
     beta: null,
     sharesOutstanding: null,
     currency: "USD",
-    exchange: "Binance",
+    exchange,
     marketState: "Open",
     time: null,
     source: "binance",
@@ -91,8 +116,8 @@ const RANGE_TO_KLINE: Record<string, { interval: string; limit: number }> = {
 export async function history(symbol: string, rangeKey: string): Promise<Candle[]> {
   const { interval, limit } = RANGE_TO_KLINE[rangeKey] ?? RANGE_TO_KLINE["6M"];
   const pair = symbol.toUpperCase() + "USDT";
-  const res = await fetch(
-    `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=${interval}&limit=${limit}`
+  const { res } = await binanceFetch(
+    `/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=${interval}&limit=${limit}`
   );
   if (!res.ok) throw new Error(`binance klines ${res.status}`);
   const rows: any[] = await res.json();
