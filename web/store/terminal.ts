@@ -19,13 +19,30 @@ export type WidgetType =
   | "calendar"
   | "insider"
   | "tv"
-  | "recap";
+  | "recap"
+  | "timemachine"
+  | "scanner"
+  | "earnings"
+  | "congress";
 
 export type WidgetInstance = {
   id: string;
   type: WidgetType;
   symbol?: string;
   linked: boolean; // follows the globally active symbol
+};
+
+/** The user's own sizing rules (day-trader-skill's trader-budget config). */
+export type TraderRules = {
+  budget: number;
+  max_loss_per_trade_usd: number;
+  max_daily_loss_usd: number;
+};
+
+export const DEFAULT_TRADER_RULES: TraderRules = {
+  budget: 5000,
+  max_loss_per_trade_usd: 50,
+  max_daily_loss_usd: 150,
 };
 
 export type LayoutItem = { i: string; x: number; y: number; w: number; h: number };
@@ -36,6 +53,8 @@ type TerminalState = {
   layout: LayoutItem[];
   watchlist: string[];
   commandOpen: boolean;
+  traderRules: TraderRules;
+  setTraderRules: (rules: TraderRules) => void;
   setActiveSymbol: (s: string) => void;
   setCommandOpen: (open: boolean) => void;
   addWidget: (type: WidgetType, symbol?: string) => void;
@@ -80,6 +99,10 @@ const SIZE_BY_TYPE: Record<WidgetType, { w: number; h: number }> = {
   insider: { w: 7, h: 9 },
   tv: { w: 6, h: 11 },
   recap: { w: 5, h: 12 },
+  timemachine: { w: 6, h: 16 },
+  scanner: { w: 6, h: 9 },
+  earnings: { w: 7, h: 10 },
+  congress: { w: 6, h: 10 },
 };
 
 export const useTerminal = create<TerminalState>()(
@@ -90,6 +113,8 @@ export const useTerminal = create<TerminalState>()(
       layout: DEFAULT_LAYOUT,
       watchlist: ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "SPY"],
       commandOpen: false,
+      traderRules: DEFAULT_TRADER_RULES,
+      setTraderRules: (rules) => set({ traderRules: rules }),
       setActiveSymbol: (s) => {
         const sym = normalizeSymbol(s);
         if (sym) set({ activeSymbol: sym });
